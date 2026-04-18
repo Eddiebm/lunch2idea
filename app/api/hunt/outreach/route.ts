@@ -1,4 +1,50 @@
 import { Resend } from 'resend'
+import { Redis } from '@upstash/redis'
+
+export const runtime = 'nodejs'
+
+function getRedis() {
+  const url = process.env.UPSTASH_REDIS_REST_URL
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN
+  if (!url || !token) return null
+  return new Redis({ url, token })
+}
+
+// ── Deduplication — skip if already contacted in last 30 days ─────────────────
+async function alreadyContacted(key: string): Promise<boolean> {
+  const redis = getRedis()
+  if (!redis) return false
+  const hit = await redis.get(`contacted:${key}`)
+  return !!hit
+}
+
+async function markContacted(key: string, meta: object) {
+  const redis = getRedis()
+  if (!redis) return
+  await redis.set(`contacted:${key}`, JSON.stringify({ ...meta, at: Date.now() }), { ex: 60 * 60 * 24 * 30 })
+}
+
+// ── SMS via Twilio (fallback when no email) ───────────────────────────────────
+async function sendSMS(to: string, businessName: string, previewUrl: string): Promise<boolean> {
+  const sid = process.env.TWILIO_ACCOUNT_SID
+  const token = process.env.TWILIO_AUTH_TOKEN
+  const from = process.env.TWILIO_PHONE_NUMBER
+  if (!sid || !token || !from) return false
+
+  const body = `Hi! I found ${businessName} on Google Maps and built you a free website. See it here: ${previewUrl}\n\nTo go live: $299 one-time. Reply STOP to opt out. — idea2Lunch`
+
+  try {
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${btoa(`${sid}:${token}`)}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({ To: to, From: from, Body: body }).toString(),
+    })
+    return res.ok
+  } catch { return false }
+}
 
 // ── Find business email via Hunter.io ─────────────────────────────────────────
 async function findEmail(website: string, businessName: string): Promise<{
@@ -126,6 +172,7 @@ export async function POST(req: Request) {
   const resend = new Resend(process.env.RESEND_API_KEY)
   try {
     const {
+      action,
       businessName,
       website,
       phone,
@@ -133,12 +180,30 @@ export async function POST(req: Request) {
       city,
       industry,
       previewUrl,
+      token,
       ownerName,
+      scheduledFor,
       checkEmailOnly = false,
     } = await req.json()
 
+    // ── Queue action: store job in Redis for the outreach script to pick up ──
+    if (action === 'queue') {
+      const redis = getRedis()
+      if (redis && businessName && previewUrl) {
+        const job = { businessName, website, phone, address, city, industry, previewUrl, token, scheduledFor, queuedAt: Date.now() }
+        await redis.lpush('outreach:queue', JSON.stringify(job))
+      }
+      return Response.json({ status: 'queued', businessName })
+    }
+
     if (!businessName || !previewUrl) {
       return Response.json({ error: 'businessName and previewUrl required' }, { status: 400 })
+    }
+
+    // ── Deduplication check ───────────────────────────────────────────────────
+    const dedupKey = phone || businessName.toLowerCase().replace(/\s+/g, '')
+    if (await alreadyContacted(dedupKey)) {
+      return Response.json({ status: 'skipped', reason: 'already_contacted', businessName })
     }
 
     // ── Step 1: Find email ────────────────────────────────────────────────────
@@ -161,14 +226,21 @@ export async function POST(req: Request) {
       return Response.json({ status: 'email_found', email: recipientEmail, confidence })
     }
 
-    // Only send if confidence is reasonable (>50%) or explicitly overridden
+    // ── SMS fallback when no email found ─────────────────────────────────────
+    if (!recipientEmail && phone) {
+      const sent = await sendSMS(phone, businessName, previewUrl)
+      if (sent) {
+        await markContacted(dedupKey, { businessName, phone, previewUrl, channel: 'sms' })
+        return Response.json({ status: 'sent_sms', phone, businessName, previewUrl })
+      }
+      return Response.json({ status: 'no_channel', message: 'No email or SMS available', businessName })
+    }
+
     if (!recipientEmail) {
       return Response.json({
         status: 'no_email',
         message: 'Could not find email for this business',
-        businessName,
-        website,
-        previewUrl,
+        businessName, website, previewUrl,
       })
     }
 
@@ -222,6 +294,8 @@ export async function POST(req: Request) {
         <p><strong>Address:</strong> ${address || 'unknown'}</p>
       </div>`
     })
+
+    await markContacted(dedupKey, { businessName, email: recipientEmail, previewUrl, channel: 'email' })
 
     return Response.json({
       status: 'sent',
