@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import WebsitePreview from './WebsitePreview'
+import BuildFlow from './BuildFlow'
 import PhotographySection from './PhotographySection'
 
 const SYSTEM_PROMPT = `You are idea2Lunch — an elite product studio AI. Transform a raw idea into a complete, actionable product brief.
@@ -488,6 +489,9 @@ export default function BriefGenerator() {
 
           {/* Website Preview */}
           <WebsitePreview brief={output} productName={productName || 'Your Product'} isDone={isDone} />
+
+          {/* Calculator + 3 Previews + Pay */}
+          <BuildFlow brief={output} productName={productName || 'Your Product'} isDone={isDone} />
 
           {/* Photography */}
           {isDone && (
