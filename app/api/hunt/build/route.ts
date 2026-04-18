@@ -1,6 +1,14 @@
 import OpenAI from 'openai'
+import { Redis } from '@upstash/redis'
 
 export const runtime = "nodejs"
+
+function getRedis() {
+  const url = process.env.UPSTASH_REDIS_REST_URL
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN
+  if (!url || !token) return null
+  return new Redis({ url, token })
+}
 
 function hashStr(s: string): number {
   let h = 0
@@ -116,28 +124,32 @@ CRITICAL:
 
     const htmlWithBanner = html.replace(/<body([^>]*)>/i, `<body$1>${banner}`)
 
-    // Encode HTML as base64 for URL storage
-    const encoded = btoa(unescape(encodeURIComponent(htmlWithBanner)))
-
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://idea2lunch.com'
-
-    // Store slug → encoded mapping would need DB
-    // Instead: return the HTML directly and a data URL approach
-    // The preview page will receive the HTML via a short token
-
-    // Generate a simple token based on business name + timestamp
     const token = `${businessName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15)}-${Date.now().toString(36)}`
-
-    // Store in edge config or return as self-contained page
     const previewUrl = `${appUrl}/preview/${token}`
+
+    // Persist to Redis — preview page reads this
+    const redis = getRedis()
+    if (redis) {
+      await redis.set(`preview:${token}`, JSON.stringify({
+        token,
+        businessName,
+        phone: phone || null,
+        address: address || null,
+        city: city || null,
+        category: category || industry || null,
+        html: htmlWithBanner,
+        createdAt: Date.now(),
+        status: 'pending', // → 'converted' after payment
+      }), { ex: 60 * 60 * 24 * 30 }) // 30 days
+    }
 
     return Response.json({
       success: true,
       businessName,
       previewUrl,
       token,
-      html: htmlWithBanner, // Dashboard can render this in an iframe directly
-      htmlLength: html.length,
+      htmlLength: htmlWithBanner.length,
     })
 
   } catch (err: any) {
