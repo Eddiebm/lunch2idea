@@ -40,7 +40,7 @@ async function scrapeLeads(query, city) {
   const res = await fetch(`${BASE_URL}/api/hunt/scrape`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-cron-secret': API_KEY },
-    body: JSON.stringify({ query, city, limit: 20 }),
+    body: JSON.stringify({ industry: query, city, limit: 20 }),
   })
   if (!res.ok) {
     log(`Scrape failed: ${res.status} ${await res.text()}`)
