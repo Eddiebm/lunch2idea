@@ -64,7 +64,7 @@ Build a complete, beautiful, photo-rich website for this product now.
 
     const stream = await openai.chat.completions.create({
       model: 'google/gemini-2.5-flash',
-      max_tokens: 4000,
+      max_tokens: 12000,
       stream: true,
       messages: [
         { role: 'system', content: WEBSITE_SYSTEM },

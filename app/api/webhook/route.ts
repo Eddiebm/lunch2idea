@@ -13,7 +13,7 @@ function getRedis() {
 }
 
 async function deployToVercel(projectSlug: string, html: string): Promise<string | null> {
-  const token = process.env.VERCEL_TOKEN
+  const token = process.env.VERCEL_DEPLOY_TOKEN || process.env.VERCEL_TOKEN
   const teamId = process.env.VERCEL_TEAM_ID
   if (!token) return null
 

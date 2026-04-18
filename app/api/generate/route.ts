@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     if (systemPrompt) messages.unshift({ role: 'system', content: systemPrompt })
 
     const stream = await openai.chat.completions.create({
-      model: 'google/gemini-2.5-flash', messages, stream: true, max_tokens: 1200,
+      model: 'google/gemini-2.5-flash', messages, stream: true, max_tokens: 8000,
     })
 
     const encoder = new TextEncoder()

@@ -185,7 +185,10 @@ export default function HomePage() {
 
         {/* Footer */}
         <div style={{ borderTop: '0.5px solid rgba(0,0,0,.08)', padding: '24px', textAlign: 'center' }}>
-          <p style={{ fontSize: 13, color: '#6E6E73', margin: 0 }}>© 2026 idea2Lunch · Your idea, fully cooked.</p>
+          <p style={{ fontSize: 13, color: '#6E6E73', margin: 0 }}>
+            © 2026 idea2Lunch · Your idea, fully cooked. ·{' '}
+            <Link href="/terms" style={{ color: '#6E6E73', textDecoration: 'underline' }}>Terms of Service</Link>
+          </p>
         </div>
       </div>
     </>

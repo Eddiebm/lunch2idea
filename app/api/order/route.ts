@@ -3,6 +3,12 @@ import { Redis } from '@upstash/redis'
 
 export const runtime = 'edge'
 
+const AFRICAN_COUNTRIES = new Set([
+  'GH','NG','KE','ZA','TZ','UG','RW','CI','SN','ET','EG','MA','CM','TN','AO',
+  'MZ','ZM','MW','BW','NA','ZW','MU','CV','GM','SL','LR','GN','BJ','TG','BF',
+  'ML','NE','TD','SD','SO','DJ','MG','CD','CG','GA','GQ','BI','MR','LY','DZ',
+])
+
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2024-06-20' })
 
 function getRedis() {
@@ -10,6 +16,81 @@ function getRedis() {
   const token = process.env.UPSTASH_REDIS_REST_TOKEN
   if (!url || !token) return null
   return new Redis({ url, token })
+}
+
+async function createStripeSession(body: any, appUrl: string) {
+  const { selectedStyle, calculatedPrice, productName, contact } = body
+  const priceCents = Math.max(50, Math.round(calculatedPrice * 100))
+
+  return (stripe.checkout.sessions.create as any)({
+    mode: 'subscription',
+    payment_method_types: ['card'],
+    customer_email: contact.email,
+    line_items: [{
+      price_data: {
+        currency: 'usd',
+        product_data: { name: 'Domain + Hosting + Maintenance' },
+        unit_amount: 9700,
+        recurring: { interval: 'month' },
+      },
+      quantity: 1,
+    }],
+    subscription_data: {
+      metadata: { productName: productName.slice(0, 80), selectedStyle },
+    },
+    add_invoice_items: [{
+      price_data: {
+        currency: 'usd',
+        product_data: { name: `${productName} — one-time build (${selectedStyle})` },
+        unit_amount: priceCents,
+      },
+      quantity: 1,
+    }],
+    success_url: `${appUrl}/app?paid=1&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${appUrl}/app`,
+    metadata: {
+      productName: productName.slice(0, 80),
+      selectedStyle,
+      whatsapp: contact.whatsapp || '',
+      oneTimeFeeCents: String(priceCents),
+    },
+  })
+}
+
+async function createPaystackSession(body: any, appUrl: string) {
+  const { selectedStyle, calculatedPrice, productName, contact } = body
+  // Charge build fee + first month ($97) as a single transaction in cents
+  const totalCents = Math.round(calculatedPrice * 100) + 9700
+  const paystackKey = process.env.PAYSTACK_SECRET_KEY
+  if (!paystackKey) throw new Error('Paystack not configured')
+
+  const ref = `i2l_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+
+  const res = await fetch('https://api.paystack.co/transaction/initialize', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${paystackKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      email: contact.email,
+      amount: totalCents,       // in cents (USD)
+      currency: 'USD',
+      reference: ref,
+      callback_url: `${appUrl}/app?paid=1&ref=${ref}`,
+      metadata: {
+        productName: productName.slice(0, 80),
+        selectedStyle,
+        whatsapp: contact.whatsapp || '',
+        buildFeeCents: Math.round(calculatedPrice * 100),
+        cancel_action: `${appUrl}/app`,
+      },
+    }),
+  })
+
+  const data: any = await res.json()
+  if (!data.status) throw new Error(data.message || 'Paystack init failed')
+  return { url: data.data.authorization_url, sessionId: ref }
 }
 
 export async function POST(req: Request) {
@@ -20,74 +101,38 @@ export async function POST(req: Request) {
       calculatedPrice: number
       priceBreakdown: Array<{ label: string; amount: number }>
       productName: string
-      briefId?: string
-      contact: { email: string; whatsapp?: string }
+      contact: { email: string; whatsapp?: string; country?: string }
     }
 
-    const { selectedStyle, selectedHtml, calculatedPrice, priceBreakdown, productName, contact } = body
+    const { selectedHtml, calculatedPrice, productName, contact } = body
     if (!selectedHtml || !contact?.email || !calculatedPrice) {
       return Response.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://idea2lunch.com'
-    const priceCents = Math.max(50, Math.round(calculatedPrice * 100))
+    const usePaystack = AFRICAN_COUNTRIES.has((contact.country || '').toUpperCase())
 
-    // subscription mode — monthly recurring is the primary line, one-time build fee added to first invoice.
-    const sessionParams: any = {
-      mode: 'subscription',
-      payment_method_types: ['card'],
-      customer_email: contact.email,
-      line_items: [
-        {
-          price_data: {
-            currency: 'usd',
-            product_data: { name: 'Domain + Hosting + Maintenance' },
-            unit_amount: 9700,
-            recurring: { interval: 'month' },
-          },
-          quantity: 1,
-        },
-      ],
-      subscription_data: {
-        metadata: { productName: productName.slice(0, 80), selectedStyle },
-      },
-      add_invoice_items: [
-        {
-          price_data: {
-            currency: 'usd',
-            product_data: { name: `${productName} — one-time build (${selectedStyle})` },
-            unit_amount: priceCents,
-          },
-          quantity: 1,
-        },
-      ],
-      success_url: `${appUrl}/app?paid=1&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${appUrl}/app`,
-      metadata: {
-        productName: productName.slice(0, 80),
-        selectedStyle,
-        whatsapp: contact.whatsapp || '',
-        oneTimeFeeCents: String(priceCents),
-      },
-    }
-    const session = await stripe.checkout.sessions.create(sessionParams)
+    const { url, sessionId } = usePaystack
+      ? await createPaystackSession(body, appUrl)
+      : await createStripeSession(body, appUrl)
 
     const redis = getRedis()
     if (redis) {
-      await redis.set(`order:${session.id}`, JSON.stringify({
-        sessionId: session.id,
+      await redis.set(`order:${sessionId}`, JSON.stringify({
+        sessionId,
+        processor: usePaystack ? 'paystack' : 'stripe',
         productName,
-        selectedStyle,
+        selectedStyle: body.selectedStyle,
         selectedHtml,
         calculatedPrice,
-        priceBreakdown,
+        priceBreakdown: body.priceBreakdown,
         contact,
         createdAt: Date.now(),
         status: 'pending',
       }), { ex: 60 * 60 * 24 * 14 })
     }
 
-    return Response.json({ url: session.url, sessionId: session.id })
+    return Response.json({ url, sessionId, processor: usePaystack ? 'paystack' : 'stripe' })
   } catch (err: any) {
     console.error('order error', err)
     return Response.json({ error: err.message || 'order failed' }, { status: 500 })
