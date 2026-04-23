@@ -22,7 +22,7 @@ async function createStripeSession(body: any, appUrl: string) {
   const { selectedStyle, calculatedPrice, productName, contact } = body
   const priceCents = Math.max(50, Math.round(calculatedPrice * 100))
 
-  return (stripe.checkout.sessions.create as any)({
+  const session = await (stripe.checkout.sessions.create as any)({
     mode: 'subscription',
     payment_method_types: ['card'],
     customer_email: contact.email,
@@ -55,6 +55,7 @@ async function createStripeSession(body: any, appUrl: string) {
       oneTimeFeeCents: String(priceCents),
     },
   })
+  return { url: session.url, sessionId: session.id }
 }
 
 async function createPaystackSession(body: any, appUrl: string) {

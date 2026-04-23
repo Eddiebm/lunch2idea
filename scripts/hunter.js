@@ -13,16 +13,22 @@ const API_KEY  = process.env.HUNTER_SECRET || process.env.CRON_SECRET || ''
 
 // Default targets — rotate these to avoid SerpAPI quota limits
 const TARGETS = [
+  // US — has domains, Hunter.io finds emails
   { query: 'plumber',            city: 'Austin TX' },
   { query: 'electrician',        city: 'Austin TX' },
   { query: 'hair salon',         city: 'Austin TX' },
-  { query: 'landscaping',        city: 'Austin TX' },
   { query: 'auto repair',        city: 'Austin TX' },
-  { query: 'restaurant',         city: 'Austin TX' },
   { query: 'cleaning service',   city: 'Austin TX' },
-  { query: 'dog grooming',       city: 'Austin TX' },
-  { query: 'dentist',            city: 'Austin TX' },
-  { query: 'real estate agent',  city: 'Austin TX' },
+  // Ghana — primary market, high conversion expected
+  { query: 'restaurant',         city: 'Accra Ghana' },
+  { query: 'hair salon',         city: 'Accra Ghana' },
+  { query: 'pharmacy',           city: 'Accra Ghana' },
+  { query: 'tailoring',          city: 'Accra Ghana' },
+  { query: 'auto repair',        city: 'Accra Ghana' },
+  // Nigeria
+  { query: 'restaurant',         city: 'Lagos Nigeria' },
+  { query: 'hair salon',         city: 'Lagos Nigeria' },
+  { query: 'fashion designer',   city: 'Lagos Nigeria' },
 ]
 
 // Parse CLI args
@@ -47,8 +53,9 @@ async function scrapeLeads(query, city) {
     return []
   }
   const data = await res.json()
-  // Return only no-website or bad-website prospects
-  return (data.prospects || []).filter(b => b.priority === 'no-site' || b.priority === 'high')
+  // Include no-site, high (score<40), and medium (score<60) — medium has a domain so Hunter.io can find email
+  const all = data.all || data.prospects || []
+  return all.filter(b => b.priority === 'no-site' || b.priority === 'high' || b.priority === 'medium')
 }
 
 async function buildPreview(business) {
@@ -85,7 +92,9 @@ async function storeOutreachJob(business, preview) {
       businessName: business.name,
       phone: business.phone,
       address: business.address,
+      website: business.website || null,
       category: business.category,
+      priority: business.priority,
       previewUrl: preview.previewUrl,
       token: preview.token,
       scheduledFor: new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString(), // 7am local
