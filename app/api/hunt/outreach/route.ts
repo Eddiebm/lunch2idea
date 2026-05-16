@@ -52,9 +52,14 @@ async function scrapeSiteEmails(website: string): Promise<string[]> {
   const base = website.startsWith('http') ? website : `https://${website}`
   const re = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
   const urls = [base, `${base.replace(/\/$/, '')}/contact`, `${base.replace(/\/$/, '')}/contact-us`, `${base.replace(/\/$/, '')}/about`]
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+  }
   for (const u of urls) {
     try {
-      const res = await fetch(u, { signal: AbortSignal.timeout(6000), redirect: 'follow' })
+      const res = await fetch(u, { headers, signal: AbortSignal.timeout(6000), redirect: 'follow' })
       if (!res.ok) continue
       const html = await res.text()
       const matches = html.match(re) || []
