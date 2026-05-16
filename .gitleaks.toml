@@ -1,0 +1,42 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "dotenv-file-committed"
+description = "A .env* file was committed (use .env.example for templates)"
+path = '''(^|/)\.env($|\.(?!example$).+)'''
+regex = '''.{1,}'''
+
+[[rules]]
+id = "upstash-redis-rest-token"
+description = "Upstash Redis REST token"
+regex = '''\bgQ[A-Za-z0-9+/=]{60,}\b'''
+keywords = ["gQ"]
+
+[[rules]]
+id = "hunter-io-api-key"
+description = "Hunter.io API key"
+regex = '''(?i)(hunter[_-]?(api[_-]?)?key)[^a-z0-9]{0,5}["'`]?([a-f0-9]{40})'''
+keywords = ["hunter"]
+
+[[rules]]
+id = "serpapi-key"
+description = "SerpAPI key"
+regex = '''(?i)(serpapi[_-]?key)[^a-z0-9]{0,5}["'`]?([a-f0-9]{64})'''
+keywords = ["serpapi"]
+
+[[rules]]
+id = "vercel-oidc-token"
+description = "Vercel OIDC token (JWT)"
+regex = '''VERCEL_OIDC_TOKEN["'\s:=]+["']?eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'''
+keywords = ["VERCEL_OIDC_TOKEN"]
+
+[allowlist]
+description = "Documentation, examples, and lockfiles"
+paths = [
+  '''\.env\.example$''',
+  '''package-lock\.json$''',
+  '''yarn\.lock$''',
+  '''pnpm-lock\.yaml$''',
+  '''tsconfig\.tsbuildinfo$''',
+]
